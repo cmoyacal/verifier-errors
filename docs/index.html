@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Interactive neural contextual bandit showing when reward hacking emerges under RLVR and how raw and projected audit correction respond.">
+<title>RLVR Hacking Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a lab bench. Controls on the left, three linked plots on the right. */
+:root{
+  --bg:#f7f8f6; --panel:#ffffff; --ink:#15181a; --ink2:#4d5458; --muted:#737b80; --rule:#dde1de; --grid:#eceeec;
+  --rlvr:#2a78d6; --raw:#eb6834; --pac:#1baf7a; --reward:#8a8f93; --flow:#b9bec1;
+  --bias:#2a78d6; --leak:#eb6834; --sum:#15181a; --mark:#c23b37; --focus:#2a78d6;
+  --display:"Newsreader",Georgia,"Times New Roman",serif;
+  --body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141617; --panel:#1c1f20; --ink:#eef0ee; --ink2:#c2c7c4; --muted:#929a96; --rule:#2e3333; --grid:#252a2a;
+  --rlvr:#3987e5; --raw:#d95926; --pac:#199e70; --reward:#9aa09c; --flow:#545b59;
+  --bias:#3987e5; --leak:#d95926; --sum:#eef0ee; --mark:#e66767; --focus:#3987e5; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141617; --panel:#1c1f20; --ink:#eef0ee; --ink2:#c2c7c4; --muted:#929a96; --rule:#2e3333; --grid:#252a2a;
+  --rlvr:#3987e5; --raw:#d95926; --pac:#199e70; --reward:#9aa09c; --flow:#545b59;
+  --bias:#3987e5; --leak:#d95926; --sum:#eef0ee; --mark:#e66767; --focus:#3987e5; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 var(--body);margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:28px 40px}
+header{max-width:760px;display:grid;gap:8px;margin-bottom:22px}
+h1{font:600 clamp(28px,4vw,40px)/1.1 var(--display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+.lede{color:var(--ink2);margin:0}
+.lede b{color:var(--ink);font-weight:600}
+.grid{display:grid;grid-template-columns:minmax(0,330px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:880px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:16px;display:grid;gap:14px;min-width:0}
+h2{font:600 12px/1.2 var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:4px 0 0}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+button.preset{font:500 13px var(--body);color:var(--ink);background:transparent;border:1px solid var(--rule);border-radius:999px;padding:5px 11px;cursor:pointer}
+button.preset[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--panel)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.ctl{display:grid;gap:2px}
+.ctl label{display:flex;justify-content:space-between;gap:8px;font-size:14px;color:var(--ink2)}
+.ctl output{font:500 13px var(--mono);color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ctl small{font-size:12px;color:var(--muted)}
+input[type=range]{width:100%;accent-color:var(--ink)}
+.toggles{display:flex;flex-wrap:wrap;gap:12px;font-size:14px}
+.toggles label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.sw{width:18px;height:3px;border-radius:2px;display:inline-block;flex:none}
+.status{font-size:14px;margin:0;padding:10px 12px;border-radius:6px;background:var(--grid);border-left:3px solid var(--mark)}
+.status.ok{border-left-color:var(--pac)}
+.status b{font-weight:600}
+.busy{font:12px var(--mono);color:var(--muted);min-height:1em;margin:0}
+.plots{display:grid;gap:20px;min-width:0}
+.chart{width:100%;display:block}
+.chart text{fill:var(--muted);font:12px var(--body)}
+.chart .title{fill:var(--ink);font:600 14px var(--body)}
+.chart .tip{fill:var(--ink);font:12px var(--mono)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--ink2)}
+.legend span{display:flex;align-items:center;gap:6px}
+.hint{font-size:13px;color:var(--muted);margin:0}
+.note{font-size:14px;color:var(--ink2);max-width:760px;margin:22px 0 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>RLVR Hacking Simulator</h1>
+  <p class="lede">A neural contextual bandit: eight prompts, each with 16 <b>correct responses</b>, 16 <b>hacks</b> the verifier wrongly accepts, and 16 <b>rejected responses</b>. A small network scores every response from its features, so one update moves all of them. Change the initial hacked share, the rejected features, or the step size, and watch when reward hacking emerges and how raw and projected audit correction respond.</p>
+</header>
+
+<div class="grid">
+  <section class="panel" aria-label="Controls">
+    <h2>Presets</h2>
+    <div class="presets" role="group" aria-label="Presets">
+      <button class="preset" id="pre-turn" type="button">Reward hacking emerges</button>
+      <button class="preset" id="pre-dip" type="button">Raw correction dips</button>
+      <button class="preset" id="pre-neg" type="button">Strong negative leakage</button>
+    </div>
+
+    <h2>Start of training</h2>
+    <div class="ctl"><label for="q0">Initial hacked share q(0)<output id="q0o"></output></label><input id="q0" type="range" min="0.05" max="0.8" step="0.05"></div>
+    <div class="ctl"><label for="muN">Rejected feature mean<output id="muNo"></output></label><input id="muN" type="range" min="-2" max="1" step="0.25"><small>Moves only the rejected responses, so it changes leakage and not hack bias.</small></div>
+    <div class="ctl"><label for="acc">Accepted feature scale<output id="acco"></output></label><input id="acc" type="range" min="0.5" max="4" step="0.5"></div>
+
+    <h2>Training</h2>
+    <div class="ctl"><label for="eta">Step size η<output id="etao"></output></label><input id="eta" type="range" min="0" max="8" step="1"><small>The smallest step approximates gradient flow; larger steps show discrete updates.</small></div>
+    <div class="ctl"><label for="T">Training time<output id="To"></output></label><input id="T" type="range" min="10" max="80" step="5"></div>
+    <div class="ctl"><label for="seed">Seed<output id="seedo"></output></label><input id="seed" type="range" min="0" max="9" step="1"></div>
+
+    <h2>Audit correction</h2>
+    <div class="ctl"><label for="lam">Correction strength λ<output id="lamo"></output></label><input id="lam" type="range" min="0.5" max="10" step="0.5"></div>
+    <div class="ctl"><label for="cov">Audit coverage<output id="covo"></output></label><input id="cov" type="range" min="0" max="16" step="1"><small>Hacks audited per prompt, out of 16.</small></div>
+
+    <p class="busy" id="busy" aria-live="polite"></p>
+  </section>
+
+  <section class="plots" aria-label="Results">
+    <p class="status" id="status" aria-live="polite"></p>
+    <div class="panel">
+      <div class="toggles" role="group" aria-label="Methods shown">
+        <label><input type="checkbox" id="show-rlvr" checked><span class="sw" style="background:var(--rlvr)"></span>RLVR</label>
+        <label><input type="checkbox" id="show-raw" checked><span class="sw" style="background:var(--raw)"></span>Raw audit correction</label>
+        <label><input type="checkbox" id="show-pac" checked><span class="sw" style="background:var(--pac)"></span>Projected audit correction (PAC)</label>
+      </div>
+      <svg class="chart" id="tchart" viewBox="0 0 640 300" role="img" aria-label="Reward and correctness over training"></svg>
+      <div class="legend"><span><span class="sw" style="background:var(--reward)"></span>Dashed: reward under RLVR</span><span>Solid: correctness</span><span><span class="sw" style="background:var(--flow)"></span>Gray: RLVR correctness under gradient flow</span><span><span class="sw" style="background:var(--mark)"></span>Marker: reward hacking begins</span></div>
+    </div>
+    <div class="panel">
+      <svg class="chart" id="fchart" viewBox="0 0 640 260" role="img" aria-label="Hack bias and leakage under RLVR"></svg>
+      <div class="legend"><span><span class="sw" style="background:var(--bias)"></span>Hack bias</span><span><span class="sw" style="background:var(--leak)"></span>Leakage</span><span><span class="sw" style="background:var(--sum)"></span>Sum: hacks gain share when positive</span></div>
+    </div>
+    <div class="panel">
+      <svg class="chart" id="pchart" viewBox="0 0 640 320" role="img" aria-label="Trajectories in the plane of hack probability and correctness"></svg>
+      <p class="hint">Selective control moves up and to the left: fewer hacks and more correct responses.</p>
+    </div>
+  </section>
+</div>
+
+<p class="note">The network has four inputs, one hidden layer of 16 tanh units, and a scalar output; offsets fix the initial probabilities, with initial acceptance 2/3. Features follow the paper's Gaussian construction. Gradients are exact sums over all prompts and responses. This page re-implements the setup in the browser for intuition, so its numbers do not reproduce the paper's runs.</p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const NS="http://www.w3.org/2000/svg";
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const ETAS=[0.05,0.1,0.25,0.5,1,1.5,2,3,4];
+const PRESETS={
+  turn:{q0:0.3,muN:-0.5,acc:1,eta:0,T:40,seed:2,lam:4,cov:16},
+  dip:{q0:0.5,muN:-0.5,acc:4,eta:0,T:10,seed:0,lam:4,cov:16},
+  neg:{q0:0.3,muN:0.5,acc:1,eta:0,T:40,seed:2,lam:4,cov:16}
+};
+let S={...PRESETS.turn};
+const P=8,M=16,R=3*M,H=16,NP=H*4+H+H;
+
+function rng(seed){let a=seed>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(r){let u=0,v=0;while(u===0)u=r();while(v===0)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+function makeData(seed,muN,acc){
+  const r=rng(1000+seed), X=new Float64Array(P*R*4), sd=0.25;
+  for(let x=0;x<P;x++){
+    const e=[];for(let j=0;j<M;j++)e.push([0,1,2,3].map(()=>sd*gauss(r)));
+    const m=[0,1,2,3].map(i=>e.reduce((s,v)=>s+v[i],0)/M);
+    for(let j=0;j<M;j++){const h=[acc+e[j][0]-m[0],1+e[j][1]-m[1],e[j][2]-m[2],e[j][3]-m[3]];
+      for(let i=0;i<4;i++){X[((x*R)+M+j)*4+i]=h[i];X[((x*R)+j)*4+i]=i===1?-h[i]:h[i];}}
+    const xi=[];for(let j=0;j<M/2;j++)xi.push([0,1,2,3].map(()=>sd*gauss(r)));
+    const v=[...xi,...xi.map(a=>[a[0],-a[1],a[2],a[3]])];
+    const mv=[0,1,2,3].map(i=>v.reduce((s,a)=>s+a[i],0)/M);
+    for(let j=0;j<M;j++)for(let i=0;i<4;i++)X[((x*R)+2*M+j)*4+i]=v[j][i]-mv[i]+(i===1?muN:0);
+  }
+  return X;
+}
+function initParams(seed){const r=rng(2000+seed),t=new Float64Array(NP);
+  for(let i=0;i<H*4+H;i++)t[i]=r()-0.5; for(let i=H*4+H;i<NP;i++)t[i]=(r()-0.5)*0.5; return t;}
+
+// forward pass: logit and gradient of the network output for one response
+function fwd(t,X,o,J){
+  let f=0;
+  for(let h=0;h<H;h++){
+    const z=t[h*4]*X[o]+t[h*4+1]*X[o+1]+t[h*4+2]*X[o+2]+t[h*4+3]*X[o+3]+t[64+h];
+    const a=Math.tanh(z), w=t[80+h]; f+=w*a;
+    if(J){const d=w*(1-a*a);J[h*4]=d*X[o];J[h*4+1]=d*X[o+1];J[h*4+2]=d*X[o+2];J[h*4+3]=d*X[o+3];J[64+h]=d;J[80+h]=a;}
+  }
+  return f;
+}
+
+function simulate(X,t0,method,eta,T,q0,lam,kA,withForces){
+  const p0=2/3, a=new Float64Array(R);
+  for(let j=0;j<M;j++){a[j]=Math.log(p0*(1-q0)/M);a[M+j]=Math.log(p0*q0/M);a[2*M+j]=Math.log((1-p0)/M);}
+  const f0=new Float64Array(P*R); for(let r=0;r<P*R;r++)f0[r]=fwd(t0,X,r*4,null);
+  const t=Float64Array.from(t0), J=new Float64Array(NP), fs=new Float64Array(R), pi=new Float64Array(R);
+  const steps=Math.round(T/eta), out=[];
+  const gG=new Float64Array(NP),gH=new Float64Array(NP),gN=new Float64Array(NP),gA=new Float64Array(NP);
+  const sAll=new Float64Array(NP),sG=new Float64Array(NP),sH=new Float64Array(NP),sN=new Float64Array(NP),sA=new Float64Array(NP);
+  for(let k=0;k<=steps;k++){
+    gG.fill(0);gH.fill(0);gN.fill(0);gA.fill(0);let pG=0,pH=0;
+    for(let x=0;x<P;x++){
+      let mx=-Infinity;
+      for(let j=0;j<R;j++){fs[j]=a[j]+fwd(t,X,(x*R+j)*4,null)-f0[x*R+j];if(fs[j]>mx)mx=fs[j];}
+      let Z=0;for(let j=0;j<R;j++){pi[j]=Math.exp(fs[j]-mx);Z+=pi[j];}
+      let piG=0,piH=0,piN=0,piA=0;
+      sAll.fill(0);sG.fill(0);sH.fill(0);sN.fill(0);sA.fill(0);
+      for(let j=0;j<R;j++){
+        pi[j]/=Z; fwd(t,X,(x*R+j)*4,J); const w=pi[j];
+        const grp=j<M?sG:(j<2*M?sH:sN);
+        for(let i=0;i<NP;i++){const v=w*J[i];sAll[i]+=v;grp[i]+=v;}
+        if(j<M)piG+=w;else if(j<2*M){piH+=w;if(j-M<kA){piA+=w;for(let i=0;i<NP;i++)sA[i]+=w*J[i];}}else piN+=w;
+      }
+      for(let i=0;i<NP;i++){gG[i]+=(sG[i]-piG*sAll[i])/P;gH[i]+=(sH[i]-piH*sAll[i])/P;gN[i]+=(sN[i]-piN*sAll[i])/P;gA[i]+=(sA[i]-piA*sAll[i])/P;}
+      pG+=piG/P;pH+=piH/P;
+    }
+    const rec={t:k*eta,p:pG+pH,pG,pH};
+    if(withForces&&pG>1e-9&&pH>1e-9){
+      const pN=1-pG-pH; let bias=0,leak=0; const q=pH/(pG+pH);
+      for(let i=0;i<NP;i++){const d=gH[i]/pH-gG[i]/pG, e=gG[i]/pG-gN[i]/Math.max(pN,1e-12); bias+=d*d; leak+=d*e;}
+      rec.bias=q*bias; rec.leak=leak;
+    }
+    out.push(rec);
+    if(k===steps)break;
+    // update
+    let uA=null;
+    if(method!=="rlvr"&&kA>0){
+      uA=new Float64Array(NP);
+      if(method==="raw"){for(let i=0;i<NP;i++)uA[i]=-lam*gA[i];}
+      else{let n=0,d=0;for(let i=0;i<NP;i++){const g=gG[i]+gH[i];n+=g*g;d+=g*gA[i];}
+        const c=n>1e-14?d/n:0;for(let i=0;i<NP;i++)uA[i]=-lam*(gA[i]-c*(gG[i]+gH[i]));}
+    }
+    for(let i=0;i<NP;i++)t[i]+=eta*(gG[i]+gH[i]+(uA?uA[i]:0));
+  }
+  return out;
+}
+
+function onset(run){
+  for(let k=1;k<run.length;k++){if(run[k].pG<run[k-1].pG-1e-7&&run[k].p>run[k-1].p+1e-9)return k-1;}
+  return -1;
+}
+
+function el(tag,attrs,parent,text){const n=document.createElementNS(NS,tag);for(const k in attrs)n.setAttribute(k,attrs[k]);if(text!=null)n.textContent=text;parent&&parent.appendChild(n);return n;}
+function axes(svg,box,xd,yd,xl,yl,xt,yt,fmt){
+  const X=v=>box.x+(v-xd[0])/(xd[1]-xd[0])*box.w, Y=v=>box.y+box.h-(v-yd[0])/(yd[1]-yd[0])*box.h;
+  yt.forEach(v=>{el("line",{x1:box.x,x2:box.x+box.w,y1:Y(v),y2:Y(v),stroke:css("--grid")},svg);el("text",{x:box.x-8,y:Y(v)+4,"text-anchor":"end"},svg,(fmt||(z=>+z.toFixed(2)))(v));});
+  xt.forEach(v=>el("text",{x:X(v),y:box.y+box.h+18,"text-anchor":"middle"},svg,+v.toFixed(2)));
+  el("line",{x1:box.x,x2:box.x+box.w,y1:box.y+box.h,y2:box.y+box.h,stroke:css("--ink2")},svg);
+  el("text",{x:box.x+box.w/2,y:box.y+box.h+38,"text-anchor":"middle"},svg,xl);
+  el("text",{x:14,y:box.y+box.h/2,transform:`rotate(-90 14 ${box.y+box.h/2})`,"text-anchor":"middle"},svg,yl);
+  return {X,Y};
+}
+const path=(pts,X,Y,fx,fy)=>pts.map((d,i)=>(i?"L":"M")+X(fx(d)).toFixed(1)+" "+Y(fy(d)).toFixed(1)).join(" ");
+const ticks=(a,b,n)=>Array.from({length:n+1},(_,i)=>a+i*(b-a)/n);
+const shown=m=>$("show-"+m).checked;
+
+let runs=null;
+function drawT(){
+  const svg=$("tchart"); svg.innerHTML="";
+  const box={x:56,y:30,w:560,h:220};
+  el("text",{x:56,y:18,class:"title"},svg,"Reward and correctness during training");
+  const {X,Y}=axes(svg,box,[0,S.T],[0,1],"Training time","Probability",ticks(0,S.T,4),[0,0.25,0.5,0.75,1]);
+  if(runs.flow)el("path",{d:path(runs.flow,X,Y,d=>d.t,d=>d.pG),fill:"none",stroke:css("--flow"),"stroke-width":4,"stroke-linecap":"round"},svg);
+  el("path",{d:path(runs.rlvr,X,Y,d=>d.t,d=>d.p),fill:"none",stroke:css("--reward"),"stroke-width":2,"stroke-dasharray":"5 4"},svg);
+  ["rlvr","raw","pac"].forEach(m=>{if(shown(m)&&runs[m])el("path",{d:path(runs[m],X,Y,d=>d.t,d=>d.pG),fill:"none",stroke:css("--"+m),"stroke-width":2.2,"stroke-linejoin":"round"},svg);});
+  const k=runs.onset;
+  if(k>=0&&shown("rlvr")){const d=runs.rlvr[k];
+    el("line",{x1:X(d.t),x2:X(d.t),y1:box.y,y2:box.y+box.h,stroke:css("--mark"),"stroke-dasharray":"3 3"},svg);
+    el("circle",{cx:X(d.t),cy:Y(d.pG),r:6,fill:css("--panel"),stroke:css("--mark"),"stroke-width":2.5},svg);
+    const right=X(d.t)<box.x+box.w-150;
+    el("text",{x:X(d.t)+(right?8:-8),y:box.y+box.h-10,"text-anchor":right?"start":"end",fill:css("--mark")},svg,`reward hacking begins, t = ${d.t.toFixed(1)}`);}
+  // hover readout
+  const cross=el("g",{visibility:"hidden"},svg), vl=el("line",{y1:box.y,y2:box.y+box.h,stroke:css("--ink2"),"stroke-dasharray":"2 3"},cross);
+  const bg=el("rect",{width:170,height:88,rx:4,fill:css("--panel"),stroke:css("--rule")},cross);
+  const lines=[0,1,2,3,4].map(()=>el("text",{class:"tip"},cross));
+  const hit=el("rect",{x:box.x,y:box.y,width:box.w,height:box.h,fill:"transparent"},svg);
+  hit.addEventListener("pointermove",ev=>{
+    const r=svg.getBoundingClientRect(),x=(ev.clientX-r.left)/r.width*640,t=Math.max(0,Math.min(S.T,(x-box.x)/box.w*S.T));
+    const at=run=>run?run[Math.min(run.length-1,Math.round(t/S.T*(run.length-1)))]:null;
+    cross.setAttribute("visibility","visible");vl.setAttribute("x1",X(t));vl.setAttribute("x2",X(t));
+    const bx=X(t)+180>box.x+box.w?X(t)-178:X(t)+8;bg.setAttribute("x",bx);bg.setAttribute("y",box.y+24);
+    const a=at(runs.rlvr),b=at(runs.raw),c=at(runs.pac);
+    const rows=[`t = ${t.toFixed(1)}`,`reward RLVR  ${a.p.toFixed(3)}`,`pG  RLVR     ${a.pG.toFixed(3)}`,`pG  Raw      ${b?b.pG.toFixed(3):"–"}`,`pG  PAC      ${c?c.pG.toFixed(3):"–"}`];
+    lines.forEach((n,j)=>{n.setAttribute("x",bx+8);n.setAttribute("y",box.y+40+j*16);n.textContent=rows[j];});
+  });
+  hit.addEventListener("pointerleave",()=>cross.setAttribute("visibility","hidden"));
+}
+function drawF(){
+  const svg=$("fchart"); svg.innerHTML="";
+  const box={x:56,y:30,w:560,h:180}, rs=runs.rlvr.filter(d=>d.bias!=null);
+  el("text",{x:56,y:18,class:"title"},svg,"Forces on the log odds under RLVR");
+  const vals=rs.flatMap(d=>[d.bias,d.leak,d.bias+d.leak]);
+  let lo=Math.min(0,...vals),hi=Math.max(0,...vals); const raw=(hi-lo)/4||1, mag=10**Math.floor(Math.log10(raw)), step=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=raw);
+  lo=Math.floor(lo/step)*step; hi=Math.ceil(hi/step)*step; const yt=[];for(let v=lo;v<=hi+1e-9;v+=step)yt.push(+v.toFixed(6));
+  const {X,Y}=axes(svg,box,[0,S.T],[lo,hi],"Training time","Contribution",ticks(0,S.T,4),yt,v=>+v.toFixed(2));
+  el("line",{x1:box.x,x2:box.x+box.w,y1:Y(0),y2:Y(0),stroke:css("--ink2"),"stroke-width":1},svg);
+  el("path",{d:path(rs,X,Y,d=>d.t,d=>d.bias),fill:"none",stroke:css("--bias"),"stroke-width":2},svg);
+  el("path",{d:path(rs,X,Y,d=>d.t,d=>d.leak),fill:"none",stroke:css("--leak"),"stroke-width":2},svg);
+  el("path",{d:path(rs,X,Y,d=>d.t,d=>d.bias+d.leak),fill:"none",stroke:css("--sum"),"stroke-width":2,"stroke-dasharray":"6 3"},svg);
+}
+function drawP(){
+  const svg=$("pchart"); svg.innerHTML="";
+  const box={x:56,y:30,w:560,h:230};
+  el("text",{x:56,y:18,class:"title"},svg,"Hack probability against correctness");
+  const {X,Y}=axes(svg,box,[0,1],[0,1],"Hack probability pH","Correctness pG",ticks(0,1,5),[0,0.25,0.5,0.75,1]);
+  ["rlvr","raw","pac"].forEach(m=>{if(!shown(m)||!runs[m])return;const r=runs[m];
+    el("path",{d:path(r,X,Y,d=>d.pH,d=>d.pG),fill:"none",stroke:css("--"+m),"stroke-width":2.2,"stroke-linejoin":"round"},svg);
+    const e=r[r.length-1];el("circle",{cx:X(e.pH),cy:Y(e.pG),r:5,fill:css("--"+m),stroke:css("--panel"),"stroke-width":2},svg);});
+  const s=runs.rlvr[0];el("circle",{cx:X(s.pH),cy:Y(s.pG),r:6,fill:css("--panel"),stroke:css("--ink"),"stroke-width":2},svg);
+  el("text",{x:X(s.pH)+10,y:Y(s.pG)+16},svg,"start");
+}
+function drawAll(){if(!runs)return;drawT();drawF();drawP();
+  const st=$("status"), k=runs.onset;
+  if(k>=0){const d=runs.rlvr[k];st.className="status";st.innerHTML=`<b>Reward hacking emerges at t = ${d.t.toFixed(1)} under RLVR.</b> Correctness peaks at ${d.pG.toFixed(2)} while reward keeps rising; from then on the loss from redistribution toward hacks exceeds the gain from rising acceptance.`;}
+  else{st.className="status ok";st.innerHTML=`<b>No reward hacking within this horizon.</b> Correctness rises with reward under RLVR, so the gain from rising acceptance stays ahead of any redistribution toward hacks.`;}
+}
+
+function labels(){
+  $("q0o").textContent=S.q0.toFixed(2);$("muNo").textContent=S.muN.toFixed(2);$("acco").textContent=S.acc.toFixed(1);
+  $("etao").textContent=S.eta===0?"0.05 (≈ flow)":ETAS[S.eta];$("To").textContent=S.T;$("seedo").textContent=S.seed;
+  $("lamo").textContent=S.lam.toFixed(1);$("covo").textContent=`${S.cov} of 16`;
+  for(const k of ["q0","muN","acc","eta","T","seed","lam","cov"])$(k).value=S[k];
+}
+let pending=null;
+function recompute(){
+  labels(); $("busy").textContent="Computing…";
+  clearTimeout(pending);
+  pending=setTimeout(()=>{
+    const X=makeData(S.seed,S.muN,S.acc), t0=initParams(S.seed), eta=ETAS[S.eta];
+    const r={rlvr:simulate(X,t0,"rlvr",eta,S.T,S.q0,S.lam,S.cov,true)};
+    r.raw=S.cov>0?simulate(X,t0,"raw",eta,S.T,S.q0,S.lam,S.cov,false):null;
+    r.pac=S.cov>0?simulate(X,t0,"pac",eta,S.T,S.q0,S.lam,S.cov,false):null;
+    r.flow=S.eta>0?simulate(X,t0,"rlvr",ETAS[0],S.T,S.q0,S.lam,S.cov,false):null;
+    r.onset=onset(r.rlvr); runs=r; drawAll(); $("busy").textContent="";
+  },30);
+}
+function setActive(k){[["turn","pre-turn"],["dip","pre-dip"],["neg","pre-neg"]].forEach(([p,id])=>$(id).setAttribute("aria-pressed",String(p===k)));}
+[["turn","pre-turn"],["dip","pre-dip"],["neg","pre-neg"]].forEach(([p,id])=>$(id).addEventListener("click",()=>{S={...PRESETS[p]};setActive(p);recompute();}));
+for(const k of ["q0","muN","acc","eta","T","seed","lam","cov"]){
+  $(k).addEventListener("input",()=>{S[k]=+$(k).value;setActive(null);labels();});
+  $(k).addEventListener("change",()=>{S[k]=+$(k).value;setActive(null);recompute();});
+}
+["rlvr","raw","pac"].forEach(m=>$("show-"+m).addEventListener("change",drawAll));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",drawAll);
+new MutationObserver(drawAll).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+setActive("turn"); recompute();
+</script>
+</body>
+</html>
